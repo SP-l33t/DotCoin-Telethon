@@ -131,7 +131,7 @@ class Tapper:
 
     async def get_profile_data(self, http_client: aiohttp.ClientSession) -> dict[str]:
         try:
-            logger.info(f"{self.session_name} | bot action: [{inspect.currentframe().f_code.co_name}]")
+            logger.info(self.log_message(f"bot action: [{inspect.currentframe().f_code.co_name}]"))
             await asyncio.sleep(random.uniform(1, 3))
             response = await http_client.post(f'{DOTCOIN_API}/rest/v1/rpc/get_user_info', json={})
             response.raise_for_status()
@@ -172,7 +172,7 @@ class Tapper:
 
     async def upgrade_boosts(self, http_client: aiohttp.ClientSession, boost_type: str, lvl: int) -> bool:
         try:
-            logger.info(f"{self.session_name} | bot action: [{inspect.currentframe().f_code.co_name}]")
+            logger.info(self.log_message(f"bot action: [{inspect.currentframe().f_code.co_name}]"))
             await asyncio.sleep(random.uniform(1, 3))
             response = await http_client.post(f'{DOTCOIN_API}/rest/v1/rpc/{boost_type}', json={"lvl": lvl})
             response.raise_for_status()
@@ -375,7 +375,7 @@ class Tapper:
 
                     restored_attempt = await self.restore_attempt(http_client=http_client)
 
-                    while restored_attempt:
+                    while restored_attempt and daily_attempts < 10:
                         action = 'daily_attempts'
                         daily_attempts += 1
                         logger.info(self.log_message(f"Restore attempt: {restored_attempt}"))
@@ -444,7 +444,7 @@ class Tapper:
 
                     if settings.AUTO_UPGRADE_ATTEMPTS and balance > next_attempts_price and next_attempts_lvl <= settings.MAX_ATTEMPTS_LEVEL:
                         action = 'add_attempts'
-                        logger.info(self.log_message(self.log_message(f"action: <red>[upgrade/{action}]</red> ")))
+                        logger.info(self.log_message(f"action: <red>[upgrade/{action}]</red> "))
                         status = await self.upgrade_boosts(http_client=http_client, boost_type=action, lvl=multiple_lvl)
                         if status:
                             logger.success(self.log_message(f"action: <red>[upgrade/{action}]</red> - <c>{status}</c>"))
