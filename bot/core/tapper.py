@@ -291,10 +291,9 @@ class Tapper:
         access_token_created_time = 0
         tg_web_data = None
 
-        while True:
-            proxy_conn = {'connector': ProxyConnector.from_url(self.proxy)} if self.proxy else {}
-            async with CloudflareScraper(headers=self.headers, timeout=aiohttp.ClientTimeout(60),
-                                         **proxy_conn) as http_client:
+        proxy_conn = {'connector': ProxyConnector.from_url(self.proxy)} if self.proxy else {}
+        async with CloudflareScraper(headers=self.headers, timeout=aiohttp.ClientTimeout(60), **proxy_conn) as http_client:
+            while True:
                 if not await self.check_proxy(http_client=http_client):
                     logger.warning(self.log_message('Failed to connect to proxy server. Sleep 5 minutes.'))
                     await asyncio.sleep(300)
