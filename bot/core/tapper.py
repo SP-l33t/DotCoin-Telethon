@@ -40,6 +40,11 @@ class Tapper:
 
         self._webview_data = None
 
+        if self.proxy:
+            proxy = Proxy.from_str(self.proxy)
+            proxy_dict = proxy_utils.to_telethon_proxy(proxy)
+            self.tg_client.set_proxy(proxy_dict)
+
     def log_message(self, message) -> str:
         return f"<light-yellow>{self.session_name}</light-yellow> | {message}"
 
@@ -52,46 +57,47 @@ class Tapper:
 
         return user_agent
 
+    async def initialize_webview_data(self):
+        if not self._webview_data:
+            while True:
+                try:
+                    resolve_result = await self.tg_client(contacts.ResolveUsernameRequest(username='dotcoin_bot'))
+                    user = resolve_result.users[0]
+                    peer = InputPeerUser(user_id=user.id, access_hash=user.access_hash)
+                    self._webview_data = {'peer': peer, 'bot': user.username}
+                    break
+                except FloodWaitError as fl:
+                    fls = fl.seconds
+
+                    logger.warning(self.log_message(f"FloodWait {fl}. Waiting {fls}s"))
+                    await asyncio.sleep(fls + 3)
+
+                except (UnauthorizedError, AuthKeyUnregisteredError):
+                    raise InvalidSession(f"{self.session_name}: User is unauthorized")
+                except (UserDeactivatedError, UserDeactivatedBanError, PhoneNumberBannedError):
+                    raise InvalidSession(f"{self.session_name}: User is banned")
+
     async def get_tg_web_data(self) -> str | None:
-
-        if self.proxy:
-            proxy = Proxy.from_str(self.proxy)
-            proxy_dict = proxy_utils.to_telethon_proxy(proxy)
-        else:
-            proxy_dict = None
-        self.tg_client.set_proxy(proxy_dict)
-
         tg_web_data = None
         with self.lock:
-            async with self.tg_client as client:
-                if not self._webview_data:
-                    while True:
-                        try:
-                            resolve_result = await client(contacts.ResolveUsernameRequest(username='dotcoin_bot'))
-                            user = resolve_result.users[0]
-                            peer = InputPeerUser(user_id=user.id, access_hash=user.access_hash)
-                            input_user = InputUser(user_id=user.id, access_hash=user.access_hash)
-                            self._webview_data = {'peer': peer, 'bot': user.username}
-                            break
-                        except FloodWaitError as fl:
-                            fls = fl.seconds
-
-                            logger.warning(self.log_message(f"FloodWait {fl}"))
-                            logger.info(self.log_message(f"Sleep {fls}s"))
-
-                            await asyncio.sleep(fls + 3)
+            try:
+                if not self.tg_client.is_connected():
+                    await self.tg_client.connect()
+                await self.initialize_webview_data()
 
                 ref_id = settings.REF_ID if random.randint(0, 100) <= 85 else "r_525256526"
 
                 start_state = False
-                async for message in client.iter_messages('dotcoin_bot'):
+                async for message in self.tg_client.iter_messages('dotcoin_bot'):
                     if r'/start' in message.text:
                         start_state = True
                         break
                 if not start_state:
-                    await client(messages.StartBotRequest(bot=input_user, peer=peer, start_param=ref_id))
+                    await self.tg_client(messages.StartBotRequest(bot=self._webview_data.get('peer'),
+                                                                  peer=self._webview_data.get('peer'),
+                                                                  start_param=ref_id))
 
-                web_view = await client(messages.RequestWebViewRequest(
+                web_view = await self.tg_client(messages.RequestWebViewRequest(
                     **self._webview_data,
                     platform='android',
                     from_bot_menu=False,
@@ -107,12 +113,22 @@ class Tapper:
                 user_id = tg_web_data.split('"id":')[1].split(',"first_name"')[0]
                 self.headers['X-Telegram-User-Id'] = user_id
 
+            except InvalidSession:
+                raise
+
+            except Exception as error:
+                log_error(self.log_message(f"Unknown error during Authorization: {type(error).__name__}"))
+                await asyncio.sleep(delay=3)
+
+            finally:
+                if self.tg_client.is_connected():
+                    await self.tg_client.disconnect()
+
         return tg_web_data
 
     async def get_token(self, http_client: aiohttp.ClientSession, tg_web_data: str) -> dict[str] | None:
         try:
-            http_client.headers[
-                "Authorization"] = f"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impqdm5tb3luY21jZXdudXlreWlkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MDg3MDE5ODIsImV4cCI6MjAyNDI3Nzk4Mn0.oZh_ECA6fA2NlwoUamf1TqF45lrMC0uIdJXvVitDbZ8"
+            http_client.headers["Authorization"] = f"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impqdm5tb3luY21jZXdudXlreWlkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MDg3MDE5ODIsImV4cCI6MjAyNDI3Nzk4Mn0.oZh_ECA6fA2NlwoUamf1TqF45lrMC0uIdJXvVitDbZ8"
             http_client.headers["Content-Type"] = "application/json"
             logger.info(self.log_message(f"bot action: [{inspect.currentframe().f_code.co_name}]"))
             await asyncio.sleep(random.uniform(1, 3))
