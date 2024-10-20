@@ -263,7 +263,7 @@ class Tapper:
                             await asyncio.sleep(300)
                             continue
 
-                    http_client.headers['X-Telegram-User-Id'] = self.user_id
+                    http_client.headers['X-Telegram-User-Id'] = str(self.user_id)
 
                     access_token_created_time = time()
 
