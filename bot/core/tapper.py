@@ -1,22 +1,20 @@
 import aiohttp
 import asyncio
+import json
 import inspect
-import os
-import random
+import re
 from aiocfscrape import CloudflareScraper
 from aiohttp_proxy import ProxyConnector
 from better_proxy import Proxy
 from datetime import datetime, timezone
+from random import randint, uniform
 from time import time
-from urllib.parse import unquote
+from urllib.parse import unquote, parse_qs
 
-from opentele.tl import TelegramClient
-from telethon.errors import *
-from telethon.types import InputPeerUser
-from telethon.functions import messages, contacts
+from bot.utils.universal_telegram_client import UniversalTelegramClient
 
 from bot.config import settings
-from bot.utils import logger, log_error, proxy_utils, config_utils, AsyncInterProcessLock, CONFIG_PATH
+from bot.utils import logger, log_error, config_utils, CONFIG_PATH, first_run
 from bot.exceptions import InvalidSession
 from .headers import headers, get_sec_ch_ua
 
@@ -25,12 +23,9 @@ DOTCOIN_API = "https://api.dotcoin.bot"
 
 
 class Tapper:
-    def __init__(self, tg_client: TelegramClient):
+    def __init__(self, tg_client: UniversalTelegramClient):
         self.tg_client = tg_client
-        self.session_name, _ = os.path.splitext(os.path.basename(tg_client.session.filename))
-        self.lock = AsyncInterProcessLock(
-            os.path.join(os.path.dirname(CONFIG_PATH), 'lock_files', f"{self.session_name}.lock"))
-        self.headers = headers
+        self.session_name = tg_client.session_name
 
         session_config = config_utils.get_session_config(self.session_name, CONFIG_PATH)
 
@@ -38,6 +33,7 @@ class Tapper:
             logger.critical(self.log_message('CHECK accounts_config.json as it might be corrupted'))
             exit(-1)
 
+        self.headers = headers
         user_agent = session_config.get('user_agent')
         self.headers['user-agent'] = user_agent
         self.headers.update(**get_sec_ch_ua(user_agent))
@@ -45,95 +41,31 @@ class Tapper:
         self.proxy = session_config.get('proxy')
         if self.proxy:
             proxy = Proxy.from_str(self.proxy)
-            proxy_dict = proxy_utils.to_telethon_proxy(proxy)
-            self.tg_client.set_proxy(proxy_dict)
+            self.tg_client.set_proxy(proxy)
+
+        self.user_id = None
 
         self._webview_data = None
 
     def log_message(self, message) -> str:
         return f"<ly>{self.session_name}</ly> | {message}"
 
-    async def initialize_webview_data(self):
-        if not self._webview_data:
-            while True:
-                try:
-                    resolve_result = await self.tg_client(contacts.ResolveUsernameRequest(username='dotcoin_bot'))
-                    user = resolve_result.users[0]
-                    peer = InputPeerUser(user_id=user.id, access_hash=user.access_hash)
-                    self._webview_data = {'peer': peer, 'bot': user.username}
-                    break
-                except FloodWaitError as fl:
-                    logger.warning(self.log_message(f"FloodWait {fl}. Waiting {fl.seconds}s"))
-                    await asyncio.sleep(fl.seconds + 3)
-                except (UnauthorizedError, AuthKeyUnregisteredError):
-                    raise InvalidSession(f"{self.session_name}: User is unauthorized")
-                except (UserDeactivatedError, UserDeactivatedBanError, PhoneNumberBannedError):
-                    raise InvalidSession(f"{self.session_name}: User is banned")
+    async def get_tg_web_data(self) -> str:
+        webview_url = await self.tg_client.get_webview_url('dotcoin_bot', 'https://app.dotcoin.bot', "r_525256526")
 
-    async def get_tg_web_data(self) -> str | None:
-        if self.proxy and not self.tg_client._proxy:
-            logger.critical(self.log_message('Proxy found, but not passed to TelegramClient'))
-            exit(-1)
+        tg_web_data = unquote(unquote(string=webview_url.split('tgWebAppData=')[1].split('&tgWebAppVersion')[0]))
+        user_data = json.loads(parse_qs(tg_web_data).get('user', [''])[0])
 
-        tg_web_data = None
-        async with self.lock:
-            try:
-                if not self.tg_client.is_connected():
-                    await self.tg_client.connect()
-                await self.initialize_webview_data()
-                await asyncio.sleep(random.uniform(1, 2))
-
-                ref_id = settings.REF_ID if random.randint(0, 100) <= 85 else "r_525256526"
-
-                start_state = False
-                async for message in self.tg_client.iter_messages('dotcoin_bot'):
-                    if r'/start' in message.text:
-                        start_state = True
-                        break
-                await asyncio.sleep(random.uniform(0.5, 1))
-
-                if not start_state:
-                    await self.tg_client(messages.StartBotRequest(bot=self._webview_data.get('peer'),
-                                                                  peer=self._webview_data.get('peer'),
-                                                                  start_param=ref_id))
-                    await asyncio.sleep(random.uniform(1, 2))
-
-                web_view = await self.tg_client(messages.RequestWebViewRequest(
-                    **self._webview_data,
-                    platform='android',
-                    from_bot_menu=False,
-                    url='https://app.dotcoin.bot',
-                    start_param=ref_id
-                ))
-
-                auth_url = web_view.url
-                tg_web_data = unquote(
-                    string=unquote(
-                        string=auth_url.split('tgWebAppData=', maxsplit=1)[1].split('&tgWebAppVersion', maxsplit=1)[0]))
-
-                user_id = tg_web_data.split('"id":')[1].split(',"first_name"')[0]
-                self.headers['X-Telegram-User-Id'] = user_id
-
-            except InvalidSession:
-                raise
-
-            except Exception as error:
-                log_error(self.log_message(f"Unknown error during Authorization: {type(error).__name__}"))
-                await asyncio.sleep(delay=3)
-
-            finally:
-                if self.tg_client.is_connected():
-                    await self.tg_client.disconnect()
-                    await asyncio.sleep(15)
+        self.user_id = user_data.get('id')
 
         return tg_web_data
 
-    async def get_token(self, http_client: aiohttp.ClientSession, tg_web_data: str) -> dict[str] | None:
+    async def get_token(self, http_client: CloudflareScraper, tg_web_data: str) -> dict[str] | None:
         try:
             http_client.headers["Authorization"] = f"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impqdm5tb3luY21jZXdudXlreWlkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MDg3MDE5ODIsImV4cCI6MjAyNDI3Nzk4Mn0.oZh_ECA6fA2NlwoUamf1TqF45lrMC0uIdJXvVitDbZ8"
             http_client.headers["Content-Type"] = "application/json"
             logger.info(self.log_message(f"bot action: [{inspect.currentframe().f_code.co_name}]"))
-            await asyncio.sleep(random.uniform(1, 3))
+            await asyncio.sleep(uniform(1, 3))
             response = await http_client.post(f'{DOTCOIN_API}/functions/v1/getToken', json={"initData": tg_web_data})
             response.raise_for_status()
 
@@ -147,10 +79,10 @@ class Tapper:
             log_error(self.log_message(f"Unknown error when getting access token: {error}"))
             await asyncio.sleep(delay=10)
 
-    async def get_profile_data(self, http_client: aiohttp.ClientSession) -> dict[str]:
+    async def get_profile_data(self, http_client: CloudflareScraper) -> dict[str]:
         try:
             logger.info(self.log_message(f"bot action: [{inspect.currentframe().f_code.co_name}]"))
-            await asyncio.sleep(random.uniform(1, 3))
+            await asyncio.sleep(uniform(1, 3))
             response = await http_client.post(f'{DOTCOIN_API}/rest/v1/rpc/get_user_info', json={})
             response.raise_for_status()
             response_json = await response.json()
@@ -160,10 +92,10 @@ class Tapper:
             log_error(self.log_message(f"Unknown error when getting Profile Data: {error}"))
             await asyncio.sleep(delay=10)
 
-    async def get_tasks_data(self, http_client: aiohttp.ClientSession, is_premium: bool) -> dict:
+    async def get_tasks_data(self, http_client: CloudflareScraper, is_premium: bool) -> dict:
         try:
             logger.info(self.log_message(f"bot action: [{inspect.currentframe().f_code.co_name}]"))
-            await asyncio.sleep(random.uniform(1, 3))
+            await asyncio.sleep(uniform(1, 3))
             response = await http_client.get(
                 f'{DOTCOIN_API}/rest/v1/rpc/get_filtered_tasks?platform=android&locale=en&is_premium={is_premium}')
             response.raise_for_status()
@@ -174,10 +106,10 @@ class Tapper:
             log_error(self.log_message(f"Unknown error when getting Tasks Data: {error}"))
             await asyncio.sleep(delay=10)
 
-    async def complete_task(self, http_client: aiohttp.ClientSession, task_id: int) -> bool:
+    async def complete_task(self, http_client: CloudflareScraper, task_id: int) -> bool:
         try:
             logger.info(self.log_message(f"bot action: [{inspect.currentframe().f_code.co_name}]"))
-            await asyncio.sleep(random.uniform(1, 3))
+            await asyncio.sleep(uniform(1, 3))
             response = await http_client.post(f'{DOTCOIN_API}/rest/v1/rpc/complete_task', json={"oid": task_id})
             response.raise_for_status()
             response_json = await response.json()
@@ -188,10 +120,10 @@ class Tapper:
             await asyncio.sleep(delay=10)
             return False
 
-    async def upgrade_boosts(self, http_client: aiohttp.ClientSession, boost_type: str, lvl: int) -> bool:
+    async def upgrade_boosts(self, http_client: CloudflareScraper, boost_type: str, lvl: int) -> bool:
         try:
             logger.info(self.log_message(f"bot action: [{inspect.currentframe().f_code.co_name}]"))
-            await asyncio.sleep(random.uniform(1, 3))
+            await asyncio.sleep(uniform(1, 3))
             response = await http_client.post(f'{DOTCOIN_API}/rest/v1/rpc/{boost_type}', json={"lvl": lvl})
             response.raise_for_status()
 
@@ -209,10 +141,10 @@ class Tapper:
             await asyncio.sleep(delay=10)
             return False
 
-    async def play_tap_game(self, http_client: aiohttp.ClientSession, taps: int):
+    async def play_tap_game(self, http_client: CloudflareScraper, taps: int):
         try:
             logger.info(self.log_message(f"bot action: [{inspect.currentframe().f_code.co_name}]"))
-            await asyncio.sleep(random.uniform(1, 3))
+            await asyncio.sleep(uniform(5, 10))
             response = await http_client.post(f'{DOTCOIN_API}/rest/v1/rpc/save_coins', json={"coins": taps})
             response.raise_for_status()
             response_json = await response.json()
@@ -223,10 +155,10 @@ class Tapper:
             await asyncio.sleep(delay=10)
             return False
 
-    async def try_your_luck(self, http_client: aiohttp.ClientSession, luck_amount: int) -> bool:
+    async def try_your_luck(self, http_client: CloudflareScraper, luck_amount: int) -> bool:
         try:
             logger.info(self.log_message(f"bot action: [{inspect.currentframe().f_code.co_name}]"))
-            await asyncio.sleep(random.uniform(1, 3))
+            await asyncio.sleep(uniform(1, 3))
             response = await http_client.post(f'{DOTCOIN_API}/rest/v1/rpc/try_your_luck', json={"coins": luck_amount})
             response.raise_for_status()
             response_json = await response.json()
@@ -237,10 +169,10 @@ class Tapper:
             await asyncio.sleep(delay=10)
             return False
 
-    async def restore_attempt(self, http_client: aiohttp.ClientSession) -> bool:
+    async def restore_attempt(self, http_client: CloudflareScraper) -> bool:
         try:
             logger.info(self.log_message(f"bot action: [{inspect.currentframe().f_code.co_name}]"))
-            await asyncio.sleep(random.uniform(1, 3))
+            await asyncio.sleep(uniform(1, 3))
             response = await http_client.post(f'{DOTCOIN_API}/rest/v1/rpc/restore_attempt', json={})
             response.raise_for_status()
             response_json = await response.json()
@@ -251,10 +183,10 @@ class Tapper:
             await asyncio.sleep(delay=10)
             return False
 
-    async def get_assets(self, http_client: aiohttp.ClientSession) -> dict:
+    async def get_assets(self, http_client: CloudflareScraper) -> dict:
         try:
             logger.info(self.log_message(f"bot action: [{inspect.currentframe().f_code.co_name}]"))
-            await asyncio.sleep(random.uniform(1, 3))
+            await asyncio.sleep(uniform(1, 3))
             response = await http_client.post(f'{DOTCOIN_API}/rest/v1/rpc/get_assets', json={})
             response.raise_for_status()
             response_json = await response.json()
@@ -264,10 +196,10 @@ class Tapper:
             log_error(self.log_message(f"Unknown error when getting Assets Data: {error}"))
             await asyncio.sleep(delay=10)
 
-    async def spin_to_earn(self, http_client: aiohttp.ClientSession) -> dict[str]:
+    async def spin_to_earn(self, http_client: CloudflareScraper) -> dict[str]:
         try:
             logger.info(self.log_message(f"bot action: [{inspect.currentframe().f_code.co_name}]"))
-            await asyncio.sleep(random.uniform(1,3))
+            await asyncio.sleep(uniform(1, 3))
             response = await http_client.post(f'{DOTCOIN_API}/rest/v1/rpc/spin', json={})
             response.raise_for_status()
             response_json = await response.json()
@@ -277,10 +209,10 @@ class Tapper:
             log_error(self.log_message(f"Unknown error when trying claim game 'Spin to Win': {error}"))
             await asyncio.sleep(delay=10)
 
-    async def upgrade_dtc(self, http_client: aiohttp.ClientSession):
+    async def upgrade_dtc(self, http_client: CloudflareScraper):
         try:
             logger.info(self.log_message(f"bot action: [{inspect.currentframe().f_code.co_name}]"))
-            await asyncio.sleep(random.uniform(1,3))
+            await asyncio.sleep(uniform(1, 3))
             response = await http_client.post(f'{DOTCOIN_API}/functions/v1/upgradeDTCMiner')
             response.raise_for_status()
             response_json = await response.json()
@@ -290,7 +222,7 @@ class Tapper:
             log_error(self.log_message(f"Unknown error when trying claim game 'Spin to Win': {error}"))
             await asyncio.sleep(delay=10)
 
-    async def check_proxy(self, http_client: aiohttp.ClientSession) -> bool:
+    async def check_proxy(self, http_client: CloudflareScraper) -> bool:
         proxy_conn = http_client.connector
         if proxy_conn and not hasattr(proxy_conn, '_proxy_host'):
             logger.info(self.log_message(f"Running Proxy-less"))
@@ -305,7 +237,7 @@ class Tapper:
             return False
 
     async def run(self) -> None:
-        random_delay = random.uniform(1, settings.RANDOM_SESSION_START_DELAY)
+        random_delay = uniform(1, settings.RANDOM_SESSION_START_DELAY)
         logger.info(self.log_message(f"Bot will start in <light-red>{int(random_delay)}s</light-red>"))
         await asyncio.sleep(delay=random_delay)
 
@@ -320,7 +252,7 @@ class Tapper:
                     await asyncio.sleep(300)
                     continue
 
-                token_live_time = random.randint(3500, 3600)
+                token_live_time = randint(3500, 3600)
 
                 try:
                     if time() - access_token_created_time >= token_live_time:
@@ -331,6 +263,8 @@ class Tapper:
                             await asyncio.sleep(300)
                             continue
 
+                    http_client.headers['X-Telegram-User-Id'] = self.user_id
+
                     access_token_created_time = time()
 
                     get_token_data = await self.get_token(http_client=http_client, tg_web_data=tg_web_data)
@@ -340,6 +274,8 @@ class Tapper:
                         await asyncio.sleep(300)
                         continue
                     logger.info(self.log_message(f"Successfully logged in"))
+                    if self.tg_client.is_fist_run:
+                        await first_run.append_recurring_session(self.session_name)
 
                     http_client.headers["Authorization"] = f"Bearer {access_token}"
 
@@ -428,7 +364,7 @@ class Tapper:
                             continue
 
                     while daily_attempts > 0:
-                        taps = random.randint(*settings.RANDOM_TAPS_COUNT)
+                        taps = randint(*settings.RANDOM_TAPS_COUNT)
                         save_coins_data = await self.play_tap_game(http_client=http_client, taps=taps)
                         if save_coins_data.get('success'):
                             daily_attempts -= 1
@@ -452,7 +388,7 @@ class Tapper:
                     next_attempts_price = (2 ** attempts_lvl) * 1000
 
                     dtc_upgrade = await self.upgrade_dtc(http_client)
-                    if dtc_upgrade:
+                    if dtc_upgrade.get('status', False):
                         logger.success(self.log_message('Successfully upgraded DTC mining level'))
 
                     if settings.AUTO_UPGRADE_TAP and balance > next_multiple_price and next_multiple_lvl <= settings.MAX_TAP_LEVEL:
@@ -474,7 +410,7 @@ class Tapper:
                             log_error(self.log_message(f"action: <red>[upgrade/{action}]</red> - <c>{status}</c>"))
 
                     logger.info(self.log_message(f"Minimum attempts reached: {daily_attempts}"))
-                    sleep_time = random.uniform(3600, 7200)
+                    sleep_time = uniform(3600, 7200)
                     logger.info(self.log_message(f"Goint to Sleep. Next try to tap coins in {int(sleep_time)}s"))
 
                     await asyncio.sleep(sleep_time)
@@ -487,7 +423,7 @@ class Tapper:
                     await asyncio.sleep(delay=300)
 
 
-async def run_tapper(tg_client: TelegramClient):
+async def run_tapper(tg_client: UniversalTelegramClient):
     runner = Tapper(tg_client=tg_client)
     try:
         await runner.run()

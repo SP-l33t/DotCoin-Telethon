@@ -6,35 +6,41 @@
 > README in Russian available [here](README-RU.md)
 
 ## Functionality
-| Functional                                               | Supported |
-|----------------------------------------------------------|:---------:|
-| Multithreading                                           |     ✅     |
-| Binding a proxy to a session                             |     ✅     |
+|                        Functional                        | Supported |
+|:--------------------------------------------------------:|:---------:|
+|                      Multithreading                      |     ✅     |
+|               Binding a proxy to a session               |     ✅     |
 | Auto-purchase of items if you have coins (tap, attempts) |     ✅     |
-| Auto get all task if possible                            |     ✅     |
-| Random sleep time between clicks                         |     ✅     |
-| Random number of clicks per request                      |     ✅     |
-| Support telethon .session                                |     ✅     |
+|              Auto get all task if possible               |     ✅     |
+|             Random sleep time between clicks             |     ✅     |
+|           Random number of clicks per request            |     ✅     |
+|         Supports telethon AND pyrogram .session          |     ✅     |
+
+_Script searches for session files in the following folders:_
+* /sessions
+* /sessions/pyrogram
+* /session/telethon
 
 
 ## [Settings](https://github.com/SudoLite/DotCoinBot/blob/main/.env-example)
-| Setup                          | Description                                                                                                                                                                                                                                   |
-|--------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **API_ID / API_HASH**          | Platform data from which to launch a Telegram session (stock - Android)                                                                                                                                                                       |
-| **GLOBAL_CONFIG_PATH**         | Specifies the global path for accounts_config, proxies, sessions. <br/>Specify an absolute path or use an environment variable (default environment variable: **TG_FARM**) <br/>If no environment variable exists, uses the script directory. |
-| **REF_ID**                     | Your referral id after startapp=                                                                                                                                                                                                              |
-| **AUTO_UPGRADE_TAP**           | Should I improve the tap _(True / False)_                                                                                                                                                                                                     |
-| **MAX_TAP_LEVEL**              | Maximum level of tap pumping _(up to 15)_                                                                                                                                                                                                     |
-| **AUTO_UPGRADE_ATTEMPTS**      | Should I improve the limit attempts _(True / False)_                                                                                                                                                                                          |
-| **MAX_ATTEMPTS_LEVEL**         | Maximum level of limit attempts _(up to 15)_                                                                                                                                                                                                  |
-| **RANDOM_TAPS_COUNT**          | Random number of taps _(eg [50,200])_                                                                                                                                                                                                         |
-| **SLEEP_BETWEEN_TAP**          | Random delay between taps in seconds _(eg [10,25])_                                                                                                                                                                                           |
-| **SESSIONS_PER_PROXY**         | Amount of sessions, that can share same proxy ( **1** )                                                                                                                                                                                       |
+|             Setup              | Description                                                                                                                                                                                                                                   |
+|:------------------------------:|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+|     **API_ID / API_HASH**      | Platform data from which to launch a Telegram session (stock - Android)                                                                                                                                                                       |
+|     **GLOBAL_CONFIG_PATH**     | Specifies the global path for accounts_config, proxies, sessions. <br/>Specify an absolute path or use an environment variable (default environment variable: **TG_FARM**) <br/>If no environment variable exists, uses the script directory. |
+|          **FIX_CERT**          | Try to fix  SSLCertVerificationError ( True / **False** )                                                                                                                                                                                     |
+|           **REF_ID**           | Your referral id after startapp=                                                                                                                                                                                                              |
+|      **AUTO_UPGRADE_TAP**      | Should I improve the tap _(True / False)_                                                                                                                                                                                                     |
+|       **MAX_TAP_LEVEL**        | Maximum level of tap pumping _(up to 15)_                                                                                                                                                                                                     |
+|   **AUTO_UPGRADE_ATTEMPTS**    | Should I improve the limit attempts _(True / False)_                                                                                                                                                                                          |
+|     **MAX_ATTEMPTS_LEVEL**     | Maximum level of limit attempts _(up to 15)_                                                                                                                                                                                                  |
+|     **RANDOM_TAPS_COUNT**      | Random number of taps _(eg [50,200])_                                                                                                                                                                                                         |
+|     **SLEEP_BETWEEN_TAP**      | Random delay between taps in seconds _(eg [10,25])_                                                                                                                                                                                           |
+|     **SESSIONS_PER_PROXY**     | Amount of sessions, that can share same proxy ( **1** )                                                                                                                                                                                       |
 | **RANDOM_SESSION_START_DELAY** | Random delay at session start from 1 to set value (e.g. **30**)                                                                                                                                                                               |
-| **USE_PROXY_FROM_FILE**        | Whether to use a proxy from the `bot/config/proxies.txt` file (**True** / False)                                                                                                                                                              |
-| **DISABLE_PROXY_REPLACE**      | Disable automatic checking and replacement of non-working proxies before startup (True / **False**)                                                                                                                                           |
-| **DEVICE_PARAMS**              | Enter device settings to make the telegram session look more realistic  (True / **False**)                                                                                                                                                    |
-| **DEBUG_LOGGING**              | Whether to log error's tracebacks to /logs folder (True / **False**)                                                                                                                                                                          |
+|    **USE_PROXY_FROM_FILE**     | Whether to use a proxy from the `bot/config/proxies.txt` file (**True** / False)                                                                                                                                                              |
+|   **DISABLE_PROXY_REPLACE**    | Disable automatic checking and replacement of non-working proxies before startup (True / **False**)                                                                                                                                           |
+|       **DEVICE_PARAMS**        | Enter device settings to make the telegram session look more realistic  (True / **False**)                                                                                                                                                    |
+|       **DEBUG_LOGGING**        | Whether to log error's tracebacks to /logs folder (True / **False**)                                                                                                                                                                          |
 
 ## Installation
 You can download [**Repository**](https://github.com/SP-l33t/DotCoin-Telethon) by cloning it to your system and installing the necessary dependencies:

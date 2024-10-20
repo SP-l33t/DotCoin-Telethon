@@ -15,7 +15,12 @@
 |     Автоматическое получение всех заданий, если это возможно      |       ✅        |
 |                Случайное время сна между нажатиями                |       ✅        |
 |            Случайное количество кликов на один запрос             |       ✅        |
-|                    Поддержка telethon .session                    |       ✅        |
+|              Поддержка telethon И pyrogram .session               |       ✅        |
+
+_Скрипт осуществляет поиск файлов сессий в следующих папках:_
+* /sessions
+* /sessions/pyrogram
+* /session/telethon
 
 
 ## [Настройки](https://github.com/SP-l33t/DotCoin-Telethon/blob/main/.env-example/)
@@ -24,6 +29,7 @@
 |           **API_ID**           |                                                                                                                  Ваш Telegram API ID (целое число)                                                                                                                  |
 |          **API_HASH**          |                                                                                                                   Ваш Telegram API Hash (строка)                                                                                                                    |
 |     **GLOBAL_CONFIG_PATH**     | Определяет глобальный путь для accounts_config, proxies, sessions. <br/>Укажите абсолютный путь или используйте переменную окружения (по умолчанию - переменная окружения: **TG_FARM**)<br/> Если переменной окружения не существует, использует директорию скрипта |
+|          **FIX_CERT**          |                                                                                              Попытаться исправить ошибку SSLCertVerificationError ( True / **False** )                                                                                              |
 |           **REF_ID**           |                                                                                                                 Ваш реферальный ID после startapp=                                                                                                                  |
 |      **AUTO_UPGRADE_TAP**      |                                                                                                  Включить автоматиеское улучшение уровня тапов ( **True** / False)                                                                                                  |         
 |       **MAX_TAP_LEVEL**        |                                                                                                      Максимальный уровень прокачки тапа ( от 1 до 15, **5** )                                                                                                       |
